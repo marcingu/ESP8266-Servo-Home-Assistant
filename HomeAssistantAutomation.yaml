@@ -1,0 +1,17 @@
+alias: Zadana temp
+description: ""
+trigger:
+  - platform: state
+    entity_id:
+      - weather.home_hourly
+    attribute: temperature
+condition: []
+action:
+  - service: number.set_value
+    target:
+      entity_id: number.zadana_temperatura
+    data:
+      value: >-
+        {{ ((state_attr('weather.home_hourly','temperature') * -1,1).0|float +
+        44) }}
+mode: single
