@@ -1,0 +1,390 @@
+esphome:
+  name: k2
+  on_boot:
+    - number.set:
+        id: zadana
+        value: !lambda 'return id(zadane_CO);'
+    - number.set:
+        id: pozycja_serwo
+        value: !lambda 'return id(pozycja_servo);'
+
+esp8266:
+  board: esp01_1m
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: ""
+
+
+ota:
+  password: ""
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: "K2 Fallback Hotspot"
+    password: ""
+
+captive_portal:
+
+globals:
+  - id: co_wyswietlac
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: zadane_CO
+    type: int
+    restore_value: yes
+    initial_value: '40'
+
+  - id: pozycja_servo
+    type: float
+    restore_value: yes
+    initial_value: '-0.35'
+  - id: servo_max
+    type: float
+    restore_value: yes
+    initial_value: '0.25'
+  - id: servo_min
+    type: float
+    restore_value: yes
+    initial_value: '-0.52'
+  - id: servo_krok
+    type: float
+    restore_value: yes
+    initial_value: '0.05'
+    
+number:
+  - platform: template
+    name: Zadana temperatura
+    id: zadana
+    min_value: 20
+    max_value: 60
+    step: 1
+    optimistic: true
+    set_action:
+      then:
+        - lambda: |-
+            id(zadane_CO)=x;
+
+  - platform: template
+    name: Pozycja serwo
+    id: pozycja_serwo
+    min_value: -1
+    max_value: 1
+    step: 0.1
+    optimistic: true
+
+
+
+display:
+    platform: tm1638
+    id: disp
+    stb_pin: GPIO4
+    clk_pin: GPIO5
+    dio_pin: GPIO0
+    intensity: 1
+    update_interval: 1s
+    lambda: |-
+      if(id(co_wyswietlac) == 0) it.printf("CO W %3.1f", id(temperatura_co_wylot).state);
+      if(id(co_wyswietlac) == 1) it.printf("CO P %3.1f", id(temperatura_co_powrot).state);
+      if(id(co_wyswietlac) == 2) it.printf("KOTL %3.1f", id(dhttemp).state);
+      if(id(co_wyswietlac) == 3) it.printf("CWU  %3.1f", id(temperatura_cwu).state);
+      if(id(co_wyswietlac) == 4) it.printf("BUFG %3.1f", id(temperatura_bufor_gora).state);
+      if(id(co_wyswietlac) == 5) it.printf("BUF- %3.1f", id(temperatura_bufor_srodek).state);
+      if(id(co_wyswietlac) == 6) it.printf("BUF_ %3.1f", id(temperatura_bufor_dol).state);
+      if(id(co_wyswietlac) == 7) it.printf("SPAL %3.1f", id(temperatura_spalin).state);
+      if(id(co_wyswietlac) == 9) {
+        it.printf("ZADAN %d", id(zadane_CO));
+        id(co_wyswietlac) = 0; 
+        }
+      if(id(co_wyswietlac) == 10) {
+        it.printf("SE %3.1f", id(pozycja_servo));
+        id(co_wyswietlac) = 0; 
+        }
+      
+
+
+dallas:
+  - pin: 
+      number: GPIO14
+      mode: INPUT_PULLUP
+
+sensor:
+#Eksperymentalne, niedopracowane - obliczanie ilości oddanego ciepła
+- platform: template 
+  name: "Ciepło oddane"
+  lambda: |-
+      return (id(temperatura_co_wylot).state - id(temperatura_co_powrot).state) * 1.163 * 1;
+  update_interval: 60s
+
+#Eksperymentalne, niedopracowane - obliczanie mocy w buforze ciepła
+- platform: template
+  name: "Moc w buforze"
+  lambda: |-
+      return (id(temperatura_bufor_dol).state + id(temperatura_bufor_srodek).state + id(temperatura_bufor_gora).state) / 3 * 1.163; 
+  update_interval: 60s
+
+  
+- platform: dallas
+  address: 0x1a012058c362ea28
+  name: "temperatura spalin"
+  id: temperatura_spalin
+  on_value_range:
+  - below: 45.0
+    then:
+      - switch.turn_off: kociol
+  - above: 80.0
+    then:
+        - switch.turn_on: pompa_cwu
+  - below: 55.0
+    then:
+      - switch.turn_off: pompa_cwu
+  on_value:         #zabezpieczenie przed wylaczeniem zasilania kotla
+    then:
+      - lambda: |-
+          if(x > 46) id(kociol).turn_on(); 
+
+
+
+- platform: dallas
+  address: 0x048b7d841e64ff28 
+  name: "temperatura bufor srodek" #srodek
+  id: temperatura_bufor_srodek
+  on_value:     
+    then:
+      - lambda: |-
+          if(x > 55) id(led_1).turn_on(); else id(led_1).turn_off(); 
+
+
+
+- platform: dallas
+  address:  0xd745ea851e64ff28
+  name: "temperatura CWU"
+  id: temperatura_cwu
+  on_value:     
+    then:
+      - lambda: |-
+          if(x > 45) id(pompa_cwu).turn_off(); 
+
+- platform: dallas
+  address:  0x563c01f0968ce128
+  name: "temperatura bufor dol"
+  id: temperatura_bufor_dol
+  on_value:     
+    then:
+      - lambda: |-
+          if(x > 55) id(led_2).turn_on(); else id(led_2).turn_off(); 
+
+
+- platform: dallas
+  address:  0x699e66841e64ff28
+  name: "temperatura bufor gora" #gora
+  id: temperatura_bufor_gora  
+  on_value:     
+    then:
+      - lambda: |-
+          if(x > 55) id(led_0).turn_on(); else id(led_0).turn_off(); 
+
+
+- platform: dallas
+  address:  0xd13c96f648405428
+  name: "temperatura CO wylot"
+  id: temperatura_co_wylot   
+  on_value:
+    then:
+      - lambda: |-
+          if(x < id(zadane_CO)-1) id(pozycja_servo)+=id(servo_krok);
+          if(x > id(zadane_CO)+1) id(pozycja_servo)-=id(servo_krok);
+          if(isnan(x)) id(pozycja_servo)=-0.35;
+          if(id(pozycja_servo) < id(servo_min)) id(pozycja_servo)=id(servo_min);
+          if(id(pozycja_servo) > id(servo_max)) id(pozycja_servo)=id(servo_max);
+          id(trojdrogowy).write(id(pozycja_servo));
+      - number.set:
+          id: pozycja_serwo
+          value: !lambda 'return id(pozycja_servo);'
+
+- platform: dallas
+  address:  0x543c4bf648808228
+  name: "temperatura CO powrót"
+  id: temperatura_co_powrot 
+
+- platform: dht
+  pin: GPIO2
+  temperature:
+    name: "temperatura kotłowni"
+    id: dhttemp
+  humidity:
+    name: "wilgotność kotłowni"
+  model: DHT11
+  update_interval: 60s
+
+
+
+
+
+switch:
+  - platform: gpio
+    inverted: True
+    name: "Kociol"
+    pin: GPIO12
+    id: kociol
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - output.turn_on: led_5
+    on_turn_off:
+      - output.turn_off: led_5
+  - platform: gpio
+    inverted: True
+    name: "Pompa CWU"
+    pin: GPIO13
+    id: pompa_cwu
+    restore_mode: RESTORE_DEFAULT_OFF
+    on_turn_on:
+      - output.turn_on: led_6
+    on_turn_off:
+      - output.turn_off: led_6
+
+output:
+  - platform: esp8266_pwm
+    id: pwm_output_trojdrogowy
+    pin: GPIO15
+    frequency: 50 Hz
+
+  - platform: tm1638
+    # name: "ledkey1 led 0"
+    id: led_0
+    led: 0
+  - platform: tm1638
+    # name: "ledkey1 led 1"
+    id: led_1
+    led: 1
+  - platform: tm1638
+    # name: "ledkey1 led 2"
+    id: led_2
+    led: 2
+  - platform: tm1638
+    # name: "ledkey1 led 3"
+    id: led_3
+    led: 3
+  - platform: tm1638
+    # name: "ledkey1 led 4"
+    id: led_4
+    led: 4
+  - platform: tm1638
+    # name: "ledkey1 led 5"
+    id: led_5
+    led: 5
+  - platform: tm1638
+    # name: "ledkey1 led 6"
+    id: led_6
+    led: 6
+  - platform: tm1638
+    # name: "ledkey1 led 7"
+    id: led_7
+    led: 7
+
+binary_sensor:
+  - platform: tm1638
+    name: "TM1638 Button 1"
+    id: TM1638Button0
+    key: 0
+    filters:
+      - delayed_on: 10ms
+    on_press:
+     then:
+      - lambda: |-
+          if (id(co_wyswietlac) > 8) {
+            id(co_wyswietlac) = 0;
+          } else {
+            id(co_wyswietlac) += 1;
+          };
+
+  - platform: tm1638
+    name: "Zwieksz zadane_CO"
+    id: TM1638Button2
+    key: 2
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - lambda: |-
+            if(id(zadane_CO)<60) id(zadane_CO)+=1; else id(zadane_CO)=60;
+            id(co_wyswietlac) = 9;
+  
+  - platform: tm1638
+    name: "Zmniejsz zadane_CO"
+    id: TM1638Button3
+    key: 3
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - lambda: |-
+            if (id(zadane_CO)>20) id(zadane_CO)-=1; else id(zadane_CO)=20;
+            id(co_wyswietlac) = 9;
+
+  - platform: tm1638
+    name: "Zmniejsz Serwo"
+    id: TM1638Button4
+    key: 4
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - lambda: |-
+            id(pozycja_servo)-=id(servo_krok);
+            if(id(pozycja_servo) < id(servo_min)) id(pozycja_servo)=id(servo_min);
+            if(id(pozycja_servo) > id(servo_max)) id(pozycja_servo)=id(servo_max);
+            id(co_wyswietlac) = 10;
+            id(trojdrogowy).write(id(pozycja_servo));
+  
+  - platform: tm1638
+    name: "Zwieksz serwo"
+    id: TM1638Button7
+    key: 7
+    filters:
+      - delayed_on: 10ms
+    on_press:
+      then:
+        - lambda: |-
+            id(pozycja_servo)+=id(servo_krok);
+            if(id(pozycja_servo) < id(servo_min)) id(pozycja_servo)=id(servo_min);
+            if(id(pozycja_servo) > id(servo_max)) id(pozycja_servo)=id(servo_max);
+            id(co_wyswietlac) = 10;
+            id(trojdrogowy).write(id(pozycja_servo));
+
+
+  - platform: tm1638
+    name: "Przełącznik Kociol"
+    id: TM1638Button5
+    key: 5
+    filters:
+      - delayed_on: 10ms
+    on_press:
+     then:
+        - switch.toggle: kociol
+
+  
+
+  - platform: tm1638
+    name: "Przełącznik CWU"
+    id: TM1638Button6
+    key: 6
+    filters:
+      - delayed_on: 10ms
+    on_press:
+     then:
+        - switch.toggle: pompa_cwu
+ 
+servo:
+  - id: trojdrogowy
+    output: pwm_output_trojdrogowy
+
