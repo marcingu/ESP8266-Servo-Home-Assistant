@@ -1,3 +1,5 @@
+# Opis działania znajduje się tutaj: https://youtu.be/Drjh3WGYtdA
+
 esphome:
   name: k2
   on_boot:
