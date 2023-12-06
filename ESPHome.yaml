@@ -32,7 +32,7 @@ wifi:
   # Enable fallback hotspot (captive portal) in case wifi connection fails
   ap:
     ssid: "K2 Fallback Hotspot"
-    password: ""
+    password: "p1czTJBZblBU"
 
 captive_portal:
 
@@ -120,16 +120,29 @@ dallas:
       mode: INPUT_PULLUP
 
 sensor:
-#Eksperymentalne, niedopracowane - obliczanie ilości oddanego ciepła
-- platform: template 
-  name: "Ciepło oddane"
+- platform: pulse_counter
+  id: flow
+  name: "flow"
+  pin:
+    number: GPIO13
+    mode: INPUT_PULLUP
+  unit_of_measurement: "l/min"
+  # ESPHome zwraca wartość w pulsach na minutę https://community.home-assistant.io/t/using-esphome-to-build-a-water-flow-rate-meter/119380/57
+  filters:
+    - lambda: return (x/477) ;
+
+- platform: template
+  name: "Energia oddana (CO)"
+  unit_of_measurement: "kW"
   lambda: |-
-      return (id(temperatura_co_wylot).state - id(temperatura_co_powrot).state) * 1.163 * 1;
+      return (id(temperatura_co_wylot).state - id(temperatura_co_powrot).state) * 0.069833 * id(flow).state;
+  # delta T[°C] * (cieplo_wlasc wody4200[J]/(1000*60[sek]))kW * masa_wody[kg/min] - change kWmin to kW 4190J
   update_interval: 60s
 
-#Eksperymentalne, niedopracowane - obliczanie mocy w buforze ciepła
+#na 1000 litrów
 - platform: template
-  name: "Moc w buforze"
+  name: "Energia w buforze"
+  unit_of_measurement: "kWh"
   lambda: |-
       return (id(temperatura_bufor_dol).state + id(temperatura_bufor_srodek).state + id(temperatura_bufor_gora).state) / 3 * 1.163; 
   update_interval: 60s
@@ -143,12 +156,6 @@ sensor:
   - below: 45.0
     then:
       - switch.turn_off: kociol
-  - above: 80.0
-    then:
-        - switch.turn_on: pompa_cwu
-  - below: 55.0
-    then:
-      - switch.turn_off: pompa_cwu
   on_value:         #zabezpieczenie przed wylaczeniem zasilania kotla
     then:
       - lambda: |-
@@ -171,10 +178,7 @@ sensor:
   address:  0xd745ea851e64ff28
   name: "temperatura CWU"
   id: temperatura_cwu
-  on_value:     
-    then:
-      - lambda: |-
-          if(x > 45) id(pompa_cwu).turn_off(); 
+
 
 - platform: dallas
   address:  0x563c01f0968ce128
@@ -243,16 +247,7 @@ switch:
       - output.turn_on: led_5
     on_turn_off:
       - output.turn_off: led_5
-  - platform: gpio
-    inverted: True
-    name: "Pompa CWU"
-    pin: GPIO13
-    id: pompa_cwu
-    restore_mode: RESTORE_DEFAULT_OFF
-    on_turn_on:
-      - output.turn_on: led_6
-    on_turn_off:
-      - output.turn_off: led_6
+
 
 output:
   - platform: esp8266_pwm
@@ -382,11 +377,8 @@ binary_sensor:
     key: 6
     filters:
       - delayed_on: 10ms
-    on_press:
-     then:
-        - switch.toggle: pompa_cwu
+
  
 servo:
   - id: trojdrogowy
     output: pwm_output_trojdrogowy
-
